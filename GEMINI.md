@@ -38,3 +38,7 @@
   - **Why**: Business or architectural reasons behind algorithms, workarounds, or libraries.
   - **Constraints**: Parameter constraints, units, nullability policies, validation rules.
   - **Side-effects / Edge-cases**: External dependencies, exception conditions, concurrency caveats.
+
+## 5. Persistent Memory Guidelines (Mem0)
+- Session Memory Retrieval: When context, past decisions, or user preferences are needed, query memories using `search_memory` or `get_all_memories` via `mem0-local`.
+- Memory Ingestion: When important architectural decisions, constraints, or user preferences are confirmed, persist them using `add_memory` (with appropriate category and metadata).

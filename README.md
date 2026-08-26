@@ -1,9 +1,9 @@
-﻿# Antigravity Harness (Agent Guardrails)
+﻿# Antigravity Harness (Agent Guardrails & Local Memory)
 
 [![Antigravity Harness CI](https://github.com/mmmphyun/antigravity-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/mmmphyun/antigravity-harness/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Google Antigravity AI 코딩 에이전트를 위한 경량 프로덕션급 가드레일, 서킷 브레이커(Circuit Breaker), 라이프사이클 훅 하네스 시스템입니다.
+Google Antigravity AI 코딩 에이전트를 위한 경량 프로덕션급 가드레일, 서킷 브레이커(Circuit Breaker), 라이프사이클 훅 및 로컬 Mem0 영구 메모리 하네스 시스템입니다.
 
 ---
 
@@ -22,8 +22,10 @@ Google Antigravity AI 코딩 에이전트를 위한 경량 프로덕션급 가�
 3. **영구 로깅 및 세션 격리 (`state_manager.py`)**
    * 모든 차단 이벤트, 인프라 승인 요청, 테스트 실패, 회로 차단기 발동 이력을 타임스탬프 및 세션 ID와 함께 로깅.
 
-4. **로컬 메모리 연동 (Cavemem Bridge)**
-   * 도구 완료 및 세션 정지 시 백그라운드로 `cavemem hook run`을 호출하여 관측 데이터 자동 축적.
+4. **로컬 Mem0 영구 메모리 연동 (Mem0 Local MCP Server)**
+   * 외부 API/네트워크 의존성 없이 로컬 SQLite(`~/.mem0/memories.db`) + FTS5 전문 검색 엔진 기반 동작.
+   * `search_memory`, `add_memory`, `get_all_memories`, `delete_memory` MCP 도구 제공.
+   * `GEMINI.md` 상시 규칙과 연계하여 세션 간 사용자 선호도 및 아키텍처 결정 사항 영구 유지.
 
 ---
 
@@ -37,12 +39,15 @@ antigravity-harness/
 ├── harness/
 │   ├── pre_tool_use.py        # 사전 차단 및 커밋/인프라 가드레일
 │   ├── stop_validator.py      # 스마트 테스트 및 서킷 브레이커
-│   ├── post_tool_use.py       # 사후 메모리 동기화
+│   ├── post_tool_use.py       # 사후 도구 실행 훅
 │   └── state_manager.py       # 세션 격리 상태 및 영구 로깅
+├── mem0_server/
+│   └── server.py              # 로컬 Mem0 MCP 서버 (SQLite FTS5)
 ├── tests/
 │   └── test_harness.py        # 가드레일 단위 테스트
-├── GEMINI.md                  # 전역 커밋/주석 컨벤션 지침
+├── GEMINI.md                  # 전역 커밋/주석/메모리 컨벤션 지침
 ├── hooks.json                 # Antigravity 라이프사이클 훅 매핑
+├── mcp_config.json            # Antigravity MCP 서버 등록 설정
 ├── .gitignore
 └── README.md
 ```
@@ -60,7 +65,7 @@ git clone https://github.com/mmmphyun/antigravity-harness.git
 * **Windows**: `~/.gemini/config/`
 * **Linux/macOS**: `~/.gemini/config/`
 
-`harness/`, `hooks.json`, `GEMINI.md` 파일을 `~/.gemini/config/` 경로에 복사하거나 심볼릭 링크를 연결합니다.
+`harness/`, `mem0_server/`, `hooks.json`, `mcp_config.json`, `GEMINI.md` 파일을 `~/.gemini/config/` 경로에 복사하거나 심볼릭 링크를 연결합니다.
 
 ---
 

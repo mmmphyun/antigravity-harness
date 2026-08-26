@@ -1,0 +1,8 @@
+﻿{
+  "mcpServers": {
+    "mem0-local": {
+      "command": "python",
+      "args": ["C:\\Users\\User\\.gemini\\config\\mem0_server\\server.py"]
+    }
+  }
+}
