@@ -1,13 +1,13 @@
-﻿import unittest
-import json
-import os
+﻿import os
 import sys
+import unittest
 
 # harness 디렉터리를 sys.path에 추가
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "harness")))
 
-import state_manager
 import pre_tool_use
+import state_manager
+
 
 class TestHarness(unittest.TestCase):
 
@@ -34,7 +34,7 @@ class TestHarness(unittest.TestCase):
         match = pre_tool_use.COMMIT_REGEX.match(msg_invalid)
         has_korean = bool(pre_tool_use.KOREAN_CHAR_REGEX.search(msg_invalid))
         self.assertTrue(match)
-        self.assertFalse(has_korean) # 한글 누락으로 차단되어야 함
+        self.assertFalse(has_korean)
 
         # 3. 비규격 커밋 (형식 위반)
         msg_bad = "just update code"
@@ -67,6 +67,7 @@ class TestHarness(unittest.TestCase):
 
         state_manager.reset_retry_count(session_id)
         self.assertEqual(state_manager.get_retry_count(session_id), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
