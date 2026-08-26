@@ -1,4 +1,4 @@
-﻿import os
+import os
 import sys
 import unittest
 
@@ -10,7 +10,6 @@ import state_manager
 
 
 class TestHarness(unittest.TestCase):
-
     def test_dangerous_commands_blocking(self):
         is_dang, _ = pre_tool_use.check_dangerous_command("git push origin main --force")
         self.assertTrue(is_dang)
@@ -50,7 +49,9 @@ class TestHarness(unittest.TestCase):
         self.assertFalse(needs_ask)
 
         # 2. GCP
-        needs_ask, _ = pre_tool_use.check_infra_mutation("gcloud run deploy my-api --image gcr.io/test")
+        needs_ask, _ = pre_tool_use.check_infra_mutation(
+            "gcloud run deploy my-api --image gcr.io/test"
+        )
         self.assertTrue(needs_ask)
 
         needs_ask, _ = pre_tool_use.check_infra_mutation("gcloud run services list")
@@ -61,7 +62,9 @@ class TestHarness(unittest.TestCase):
         state_manager.reset_retry_count(session_id)
         self.assertEqual(state_manager.get_retry_count(session_id), 0)
 
-        count = state_manager.increment_retry_count(session_id, "Test Failure Reason", "Sample details")
+        count = state_manager.increment_retry_count(
+            session_id, "Test Failure Reason", "Sample details"
+        )
         self.assertEqual(count, 1)
         self.assertEqual(state_manager.get_retry_count(session_id), 1)
 

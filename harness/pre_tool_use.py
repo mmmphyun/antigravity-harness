@@ -1,4 +1,4 @@
-﻿import json
+import json
 import re
 import shlex
 import sys
@@ -37,7 +37,9 @@ def check_dangerous_command(command_line: str) -> tuple[bool, str]:
     cmd_lower = command_line.lower()
 
     # 1. 시스템 폴더 파괴 및 루트 삭제 차단
-    if re.search(r"rmdir\s+/[sS]\s+/[qQ]\s+[cC]:\\?(windows|program files|users\\[^\\]+$)", cmd_lower):
+    if re.search(
+        r"rmdir\s+/[sS]\s+/[qQ]\s+[cC]:\\?(windows|program files|users\\[^\\]+$)", cmd_lower
+    ):
         return True, "시스템 주요 디렉터리 삭제 명령이 차단되었습니다."
     if "rm -rf /" in cmd_lower or "rm -rf /*" in cmd_lower:
         return True, "루트 디렉터리 전체 삭제 명령이 차단되었습니다."
@@ -62,17 +64,24 @@ def check_infra_mutation(command_line: str) -> tuple[bool, str]:
 
     # GCP gcloud 인프라 변경/삭제/배포
     if cmd_lower.startswith("gcloud ") or cmd_lower.startswith("gcloud.cmd "):
-        if any(action in cmd_lower for action in [" delete", " deploy", " create", " update", " apply"]):
+        if any(
+            action in cmd_lower for action in [" delete", " deploy", " create", " update", " apply"]
+        ):
             return True, f"GCP 클라우드 리소스 변경/배포 작업 승인 요청: {command_line}"
 
     # K8s kubectl 인프라 변경
     if cmd_lower.startswith("kubectl ") or cmd_lower.startswith("kubectl.exe "):
-        if any(action in cmd_lower for action in [" delete", " apply", " patch", " edit", " scale"]):
+        if any(
+            action in cmd_lower for action in [" delete", " apply", " patch", " edit", " scale"]
+        ):
             return True, f"Kubernetes 클러스터 리소스 변경 작업 승인 요청: {command_line}"
 
     # AWS CLI 변경
     if cmd_lower.startswith("aws ") or cmd_lower.startswith("aws.cmd "):
-        if any(action in cmd_lower for action in [" delete-", " terminate-", " create-", " put-", " apply"]):
+        if any(
+            action in cmd_lower
+            for action in [" delete-", " terminate-", " create-", " put-", " apply"]
+        ):
             return True, f"AWS 리소스 변경 작업 승인 요청: {command_line}"
 
     return False, ""
@@ -117,9 +126,14 @@ def main():
                             "- 제목: 한글로 명확하게 작성 (마침표 제외)"
                         )
                         state_manager.log_event(
-                            "COMMIT_CONVENTION_BLOCKED", conv_id, "비규격 커밋 메시지 차단", first_line
+                            "COMMIT_CONVENTION_BLOCKED",
+                            conv_id,
+                            "비규격 커밋 메시지 차단",
+                            first_line,
                         )
-                        print(json.dumps({"decision": "deny", "reason": reason}, ensure_ascii=False))
+                        print(
+                            json.dumps({"decision": "deny", "reason": reason}, ensure_ascii=False)
+                        )
                         return
 
             # 3. 인프라 변경 작업 검사 (사용자 승인 요청)

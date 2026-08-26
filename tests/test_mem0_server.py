@@ -1,18 +1,20 @@
-﻿import os
+import json
+import os
 import sys
 import unittest
-import json
 
 # mem0_server 디렉터리를 sys.path에 추가
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "mem0_server")))
 
 import server
 
-class TestMem0Server(unittest.TestCase):
 
+class TestMem0Server(unittest.TestCase):
     def test_mem0_crud_operations(self):
         # 1. 메모리 추가
-        add_res = server.add_memory("CI test memory content", category="ci-test", metadata={"env": "test"})
+        add_res = server.add_memory(
+            "CI test memory content", category="ci-test", metadata={"env": "test"}
+        )
         data = json.loads(add_res)
         self.assertEqual(data.get("status"), "success")
         mem_id = data["memory"]["id"]
@@ -31,6 +33,7 @@ class TestMem0Server(unittest.TestCase):
         del_res = server.delete_memory(mem_id)
         del_data = json.loads(del_res)
         self.assertEqual(del_data.get("status"), "success")
+
 
 if __name__ == "__main__":
     unittest.main()
