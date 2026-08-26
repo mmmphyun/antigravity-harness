@@ -1,0 +1,13 @@
+﻿__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+venv/
+env/
+logs/
+*.log
+state.json
+.harness_state.json
+.DS_Store
+Thumbs.db
