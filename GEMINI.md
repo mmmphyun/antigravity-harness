@@ -1,8 +1,12 @@
 ﻿# Global Development Conventions & Environment Guidelines
 
-## 1. Response Language
-- Always respond to the user in concise, professional Korean (한국어).
-- Do NOT use emojis.
+## 1. Tone & Brevity
+- Style: Strictly factual, dry, bullet-pointed Korean (한국어).
+- Prohibited:
+  - NO emojis.
+  - NO pleasantries, introductory greetings, or concluding polite remarks.
+  - NO praise, marketing prose, or conversational fluff.
+- Output: Direct answers, code diffs, and technical facts only.
 
 ## 2. Environment & Shell Guidelines
 - Host OS: Windows
