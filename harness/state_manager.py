@@ -1,6 +1,6 @@
-﻿from datetime import datetime
-import json
+﻿import json
 import os
+from datetime import datetime
 
 STATE_FILE = os.path.join(os.path.dirname(__file__), "state.json")
 LOG_FILE = os.path.join(os.path.dirname(__file__), "logs", "harness.log")
