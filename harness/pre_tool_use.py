@@ -29,6 +29,9 @@ BULK_COMMIT_EXEMPTIONS = (
     "refactor(reorganize):",
 )
 
+WILDCARD_ADD_REGEX = re.compile(r"\bgit\s+add\b\s+(?:.*?\s+)?(\.|\-A|\-\-all|\*|\-u)(?:\s|$)")
+AUTO_COMMIT_REGEX = re.compile(r"\bgit\s+commit\b\s+.*(-[a-zA-Z]*a[a-zA-Z]*|--all\b)")
+
 
 def parse_commit_message(command_line: str) -> str:
     """CLI 인자에서 커밋 메시지 본문을 안전하게 추출"""
@@ -62,10 +65,6 @@ def check_dangerous_command(command_line: str) -> tuple[bool, str]:
     return False, ""
 
 
-WILDCARD_ADD_REGEX = re.compile(r"\bgit\s+add\b\s+(?:.*?\s+)?(\.|\-A|\-\-all|\*|\-u)(?:\s|$)")
-AUTO_COMMIT_REGEX = re.compile(r"\bgit\s+commit\b\s+.*(-[a-zA-Z]*a[a-zA-Z]*|--all\b)")
-
-
 def check_wildcard_staging(command_line: str) -> tuple[bool, str]:
     """atomic-commits 원칙: 와일드카드 git add 및 git commit -a 차단"""
     if WILDCARD_ADD_REGEX.search(command_line):
@@ -85,15 +84,51 @@ def check_wildcard_staging(command_line: str) -> tuple[bool, str]:
     return False, ""
 
 
+def check_dirty_push(command_line: str, cwd: str) -> tuple[bool, str]:
+    """워킹 트리에 미커밋 변경사항이 남아있는 상태에서 git push 차단"""
+    if not re.search(r"\bgit\s+push\b", command_line):
+        return False, ""
+
+    try:
+        if cwd and not os.path.isdir(cwd):
+            return False, ""
+        run_cwd = cwd if cwd else None
+        result = subprocess.run(
+            ["git", "diff", "HEAD", "--name-only"],
+            cwd=run_cwd,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            encoding="utf-8",
+        )
+        if result.returncode == 0:
+            dirty_files = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+            if dirty_files:
+                sample_files = ", ".join(dirty_files[:3])
+                if len(dirty_files) > 3:
+                    sample_files += f" 외 {len(dirty_files) - 3}개"
+                return (
+                    True,
+                    f"커밋되지 않은 로컬 변경사항({len(dirty_files)}개: {sample_files})이 남아있어 푸시가 차단되었습니다.\n"
+                    "모든 변경사항을 원자적으로 커밋한 후 푸시하세요.",
+                )
+    except Exception:
+        # fail-open
+        pass
+
+    return False, ""
+
+
 def check_staged_file_count(cwd: str, commit_msg: str, threshold: int = 4) -> tuple[bool, str]:
     """스테이징된 파일 수가 임계치를 초과할 경우 승인(ask) 요구"""
-    # 대량 커밋 예외 허용 확인
     first_line = commit_msg.strip().split("\n")[0] if commit_msg else ""
     if any(first_line.startswith(prefix) for prefix in BULK_COMMIT_EXEMPTIONS):
         return False, ""
 
     try:
-        run_cwd = cwd if cwd and os.path.isdir(cwd) else None
+        if cwd and not os.path.isdir(cwd):
+            return False, ""
+        run_cwd = cwd if cwd else None
         result = subprocess.run(
             ["git", "diff", "--cached", "--name-only"],
             cwd=run_cwd,
@@ -188,7 +223,14 @@ def main():
                 print(json.dumps({"decision": "deny", "reason": wildcard_reason}, ensure_ascii=False))
                 return
 
-            # 3. 커밋 메시지 컨벤션 검사 (하드 차단) 및 대량 커밋 검사
+            # 3. 워킹 트리 오염(Dirty Tree) 상태에서 git push 차단
+            is_dirty_push, dirty_reason = check_dirty_push(cmd_line, cwd)
+            if is_dirty_push:
+                state_manager.log_event("DIRTY_PUSH_BLOCKED", conv_id, dirty_reason, cmd_line)
+                print(json.dumps({"decision": "deny", "reason": dirty_reason}, ensure_ascii=False))
+                return
+
+            # 4. 커밋 메시지 컨벤션 검사 (하드 차단) 및 대량 커밋 검사
             if re.search(r"\bgit\s+commit\b", cmd_line):
                 commit_msg = parse_commit_message(cmd_line)
                 if commit_msg:
@@ -214,14 +256,14 @@ def main():
                         )
                         return
 
-                # 4. 스테이징 파일 수 초과 검사 (ask)
+                # 5. 스테이징 파일 수 초과 검사 (ask)
                 is_bulk, bulk_reason = check_staged_file_count(cwd, commit_msg)
                 if is_bulk:
                     state_manager.log_event("BULK_COMMIT_APPROVAL_REQUESTED", conv_id, bulk_reason, cmd_line)
                     print(json.dumps({"decision": "ask", "reason": bulk_reason}, ensure_ascii=False))
                     return
 
-            # 5. 인프라 변경 작업 검사 (사용자 승인 요청)
+            # 6. 인프라 변경 작업 검사 (사용자 승인 요청)
             needs_approval, approve_reason = check_infra_mutation(cmd_line)
             if needs_approval:
                 state_manager.log_event("INFRA_APPROVAL_REQUESTED", conv_id, approve_reason)
