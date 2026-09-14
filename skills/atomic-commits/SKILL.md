@@ -1,4 +1,4 @@
----
+﻿---
 name: atomic-commits
 description: >
   빅뱅 커밋을 원천 차단하고 1-Task 1-Commit 원칙을 기계적으로 준수하도록 작업을 최소 단위로 분해하고 즉시 커밋하는 하네스 연동 스킬.
@@ -8,6 +8,7 @@ description: >
 # atomic-commits: 전역 범용 마이크로 커밋 분할 프로토콜
 
 이 스킬은 LLM 에이전트의 고질적인 '일괄 완성 후 단일 거대 커밋(Big-Bang Commit)' 실행 관성을 차단하고, **1개 논리적 작업(Task) = 1개 커밋(Commit)**의 원자성을 엄격히 보장하기 위한 안티그래비티 전역 범용 프로토콜입니다.
+전역 하네스(`pre_tool_use.py`)의 물리적 가드레일과 100% 연동되어 동작합니다.
 
 ---
 
@@ -16,73 +17,61 @@ description: >
 복수 기능이나 다중 결함 수정 요구가 인입되면 모든 코드를 한 번에 작성하는 행위를 엄격히 금지하고, 반드시 아래 4단계를 순환 실행합니다.
 
 ```
-[1. Task 계획 분해] ──> [2. 단일 태스크 TDD 구현] ──> [3. 핀포인트 파일 스테이징] ──> [4. Green 즉시 커밋]
-         ▲                                                                                   │
-         └─────────────────────────── 다음 태스크로 이동 ────────────────────────────────────┘
+[1. Task 계획 분해] ──> [2. 사전 격리 TDD 구현] ──> [3. 핀포인트 파일 스테이징] ──> [4. Green-State 즉시 커밋]
+         ▲                                                                                          │
+         └─────────────────────────── 다음 태스크로 이동 ───────────────────────────────────────────┘
 ```
 
 ### 1단계: 커밋 계획 수립 (Commit Plan Decomposition)
-- 작업을 시작하기 전, 프롬프트의 요구사항을 **독립적으로 빌드/테스트 가능한 최소 커밋 단위**로 분해하여 사용자에게 먼저 선언합니다.
-- 예시:
-  - `[Commit 1/3] feat(auth): JWT 토큰 검증 로직 및 만료 예외 처리`
-  - `[Commit 2/3] feat(user): 사용자 프로필 조회 엔드포인트 및 DTO 매핑`
-  - `[Commit 3/3] feat(cache): Redis 사용자 세션 캐싱 및 무효화 연동`
+- 작업을 시작하기 전, 요구사항을 **독립적으로 빌드/테스트 가능한 최소 커밋 단위**로 분해하여 사용자에게 먼저 선언합니다.
+- **주의 (훅 정규식 충돌 방지)**: 계획 보고용 넘버링(`[태스크 1/3]`)과 실제 커밋 메시지(`<type>(<scope>): <한글>`)를 분리합니다.
+  - 계획 선언 예시:
+    - `[태스크 1/3] feat(auth): JWT 토큰 검증 로직 및 만료 예외 처리`
+    - `[태스크 2/3] feat(user): 사용자 프로필 조회 엔드포인트 및 DTO 매핑`
+    - `[태스크 3/3] feat(cache): Redis 사용자 세션 캐싱 및 무효화 연동`
 
-### 2단계: 단일 태스크 집중 구현 (Strict Scope Isolation)
-- 현재 진행 중인 1개 태스크에 속하지 않는 파일은 **단 한 글자도 미리 수정하지 않습니다**.
-- 반드시 검증 테스트(`tests/` 또는 `src/test/`)와 실제 소스(`src/`)의 1개 쌍만 집중 구현합니다.
+### 2단계: 사전 격리 구현 (Strict Scope & In-File Isolation)
+- **미완성 파일 수정 금지**: 현재 진행 중인 1개 태스크에 속하지 않는 파일은 단 한 글자도 미리 수정하지 않습니다.
+- **동일 파일 내 복수 태스크 격리**: 여러 태스크가 동일 파일(예: `models.py`, `router.py`)을 수정해야 하는 경우, CLI 비대화형 환경 특성상 사후 라인 분할(`git add -p`)이 불가능합니다. 따라서 **태스크 1의 코드 작성 및 검증 커밋이 완료된 후에만 태스크 2 코드를 편집**합니다.
 
-### 3단계: 핀포인트 명시 스테이징 (No Wildcard Staging)
-- `git add .` 또는 `git add -A`와 같은 와일드카드 명령 사용을 **전면 금지**합니다.
+### 3단계: 핀포인트 명시 스테이징 (No Wildcards)
+- `git add .`, `git add -A`, `git add --all`, `git add *`, `git commit -a` 사용은 **전역 하네스 훅에 의해 즉시 하드 차단(`deny`)**됩니다.
 - 반드시 현재 태스크에 직접 관련된 소스 및 테스트 파일 경로만 명시적으로 스테이징합니다:
   ```powershell
-  # Python 예시
+  # 올바른 예시
   git add src/auth/jwt.py tests/test_jwt.py
-
-  # TypeScript / React 예시
-  git add src/components/UserProfile.tsx src/components/UserProfile.test.tsx
-
-  # Kotlin / Java 예시
-  git add src/main/kotlin/com/example/UserService.kt src/test/kotlin/com/example/UserServiceTest.kt
-
-  # Go 예시
-  git add pkg/auth/token.go pkg/auth/token_test.go
   ```
 
-### 4단계: Green-State 즉시 커밋 (Immediate Commit)
-- 단위/통합 테스트가 통과하면 다음 태스크 코드를 작성하기 전에 **즉시 터미널에서 커밋을 실행**합니다.
+### 4단계: Green-State 즉시 커밋 (Independent Compilability)
+- **독립 빌드/테스트 보장 (`git bisect` 보호)**: 
+  - 각 마이크로 커밋은 단독 체크아웃 시에도 **100% 컴파일/빌드되고 기존 테스트가 통과하는 Green State**여야 합니다. 
+  - 인터페이스만 선언하고 구현체를 다음 커밋으로 미루어 중간 커밋의 빌드를 깨뜨리는 행위를 금지합니다.
+- 단위 테스트가 통과하면 다음 태스크 코드를 작성하기 전에 **즉시 터미널에서 커밋을 실행**합니다.
   ```powershell
-  git commit -m "<type>(<scope>): <한글 요약>"
+  git commit -m "feat(auth): JWT 토큰 검증 로직 구현"
   ```
-- 커밋 성공을 확인한 후에만 다음 태스크로 넘어갑니다.
 
 ---
 
-## 2. 원자적 커밋 크기 상한선 (Threshold Bounds)
+## 2. 하네스 물리적 가드레일 연동 규격
 
-Git 훅(pre-commit)이 설치된 레포지토리에서는 물리적 차단선으로 동작하며, 훅이 없는 일반 레포지토리에서도 에이전트가 **스스로 준수해야 하는 절대적 상한선(Self-Imposed Bound)**으로 동작합니다:
+`pre_tool_use.py` 하네스 훅에 의해 터미널 레벨에서 강제 집행됩니다:
 
-1. **최대 스테이징 파일 수**: 단일 `feat`/`refactor` 커밋당 **최대 4개 파일** (핵심 소스 1~2개 + 검증 테스트 1~2개). 초과 시 커밋을 즉시 중단하고 분할.
-2. **최대 라인 변경량**: 단일 커밋당 **최대 250줄**(diffstat insertions + deletions 기준, 문서/자동생성 파일 제외).
-3. **단일 모듈/도메인 제한**: 멀티모듈/모노레포 환경에서 2개 이상의 독립 모듈을 단일 커밋에 결합하는 행위 금지.
+1. **와일드카드 스테이징 하드 차단 (`deny`)**:
+   - `git add .`, `-A`, `--all`, `*`, `git commit -a/-am` 감지 시 즉시 실행 거부.
+2. **스테이징 파일 상한선 및 승인 요구 (`ask`)**:
+   - 단일 커밋당 스테이징 파일 수가 **4개를 초과**할 경우, 에이전트 자의적 커밋을 차단하고 사용자에게 승인(`ask`)을 요구.
+3. **대량 변경 예외 허용 (Bulk Exemptions)**:
+   - 다음 접두사로 시작하는 정당한 대규모 변경 커밋은 상한선 검사를 자동 면제합니다:
+     - `chore(init):` : 프로젝트 최초 생성 및 대량 스캐폴딩
+     - `chore(deps):` : 패키지 의존성 일괄 갱신 및 lock 파일 동기화
+     - `style(format):` : Prettier/Ruff 전역 포매팅 일괄 적용
+     - `refactor(arch):` : 아키텍처 개편에 따른 전역 패키지/디렉터리 이동
 
 ---
 
-## 3. 위반 시 비상 분할 수칙 (Emergency Re-splitting)
+## 3. Git 브랜치 및 PR 머지 전략 연계
 
-만약 실행 관성으로 인해 여러 태스크의 파일을 이미 동시에 수정해버렸다면, 전체를 일괄 커밋하지 말고 즉시 변경사항을 쪼개어 단계별로 커밋합니다:
-
-```powershell
-# 1. 모든 스테이징 해제
-git restore --staged .
-
-# 2. 첫 번째 태스크 관련 소스/테스트 파일만 개별 추가
-git add src/task1/File.py tests/task1/test_file.py
-
-# 3. 1차 원자적 커밋
-git commit -m "feat(task1): 1차 작업 요약"
-
-# 4. 두 번째 태스크 파일 추가 및 2차 원자적 커밋
-git add src/task2/File.py tests/task2/test_file.py
-git commit -m "feat(task2): 2차 작업 요약"
-```
+- **작업 브랜치**: 개발 중에는 장애 격리와 빠른 롤백을 위해 철저히 1-Task 1-Commit 원칙을 준수하여 마이크로 커밋 히스토리를 유지합니다.
+- **메인 브랜치 병합 (Squash and Merge)**:
+  - 마이크로 커밋이 메인 브랜치의 히스토리를 과도하게 파편화하지 않도록, PR을 `main`에 병합할 때는 **Squash and Merge**를 사용하여 기능 단위 단일 원자적 커밋으로 축약 병합합니다.

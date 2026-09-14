@@ -1,4 +1,4 @@
-import os
+﻿import os
 import sys
 import unittest
 
@@ -19,6 +19,21 @@ class TestHarness(unittest.TestCase):
 
         is_dang, _ = pre_tool_use.check_dangerous_command("git status")
         self.assertFalse(is_dang)
+
+    def test_wildcard_staging_blocking(self):
+        # 1. 와일드카드 git add 차단
+        for cmd in ["git add .", "git add -A", "git add --all", "git add *", "git add -u"]:
+            is_blocked, _ = pre_tool_use.check_wildcard_staging(cmd)
+            self.assertTrue(is_blocked, f"Failed to block: {cmd}")
+
+        # 2. 자동 스테이징 커밋(git commit -a) 차단
+        for cmd in ["git commit -a -m \"feat: test\"", "git commit -am \"fix: test\"", "git commit --all -m \"feat: test\""]:
+            is_blocked, _ = pre_tool_use.check_wildcard_staging(cmd)
+            self.assertTrue(is_blocked, f"Failed to block: {cmd}")
+
+        # 3. 정상적인 개별 파일 스테이징 통과
+        is_blocked, _ = pre_tool_use.check_wildcard_staging("git add src/user.py tests/test_user.py")
+        self.assertFalse(is_blocked)
 
     def test_commit_convention_parsing(self):
         # 1. 유효한 커밋 (한글 포함)

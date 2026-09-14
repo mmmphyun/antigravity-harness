@@ -1,6 +1,8 @@
-import json
+﻿import json
+import os
 import re
 import shlex
+import subprocess
 import sys
 
 import state_manager
@@ -17,6 +19,15 @@ COMMIT_REGEX = re.compile(
     r"^(feat|fix|refactor|docs|chore|test|style|perf|build|ci)(\([a-zA-Z0-9_\-\./]+\))?:\s+(.+)$"
 )
 KOREAN_CHAR_REGEX = re.compile(r"[\uac00-\ud7a3\u1100-\u11ff\u3130-\u318f]")
+
+# 대량 파일 수정이 정당화되는 예외 커밋 스코프/타입
+BULK_COMMIT_EXEMPTIONS = (
+    "chore(init):",
+    "chore(deps):",
+    "style(format):",
+    "refactor(arch):",
+    "refactor(reorganize):",
+)
 
 
 def parse_commit_message(command_line: str) -> str:
@@ -47,6 +58,65 @@ def check_dangerous_command(command_line: str) -> tuple[bool, str]:
     # 2. 강제 푸시 차단
     if re.search(r"git\s+push\s+.*(--force|-f\b)", cmd_lower):
         return True, "원격 저장소 강제 푸시(force push) 명령이 차단되었습니다."
+
+    return False, ""
+
+
+WILDCARD_ADD_REGEX = re.compile(r"\bgit\s+add\b\s+(?:.*?\s+)?(\.|\-A|\-\-all|\*|\-u)(?:\s|$)")
+AUTO_COMMIT_REGEX = re.compile(r"\bgit\s+commit\b\s+.*(-[a-zA-Z]*a[a-zA-Z]*|--all\b)")
+
+
+def check_wildcard_staging(command_line: str) -> tuple[bool, str]:
+    """atomic-commits 원칙: 와일드카드 git add 및 git commit -a 차단"""
+    if WILDCARD_ADD_REGEX.search(command_line):
+        return (
+            True,
+            "와일드카드 스테이징(git add ., -A, --all, *)은 atomic-commits 원칙에 의해 차단되었습니다.\n"
+            "변경 파일을 핀포인트로 개별 명시하세요 (예: git add <file1> <file2>).",
+        )
+
+    if AUTO_COMMIT_REGEX.search(command_line):
+        return (
+            True,
+            "자동 스테이징 커밋(git commit -a, -am)은 atomic-commits 원칙에 의해 차단되었습니다.\n"
+            "먼저 대상 파일을 개별 명시하여 git add한 후 커밋하세요.",
+        )
+
+    return False, ""
+
+
+def check_staged_file_count(cwd: str, commit_msg: str, threshold: int = 4) -> tuple[bool, str]:
+    """스테이징된 파일 수가 임계치를 초과할 경우 승인(ask) 요구"""
+    # 대량 커밋 예외 허용 확인
+    first_line = commit_msg.strip().split("\n")[0] if commit_msg else ""
+    if any(first_line.startswith(prefix) for prefix in BULK_COMMIT_EXEMPTIONS):
+        return False, ""
+
+    try:
+        run_cwd = cwd if cwd and os.path.isdir(cwd) else None
+        result = subprocess.run(
+            ["git", "diff", "--cached", "--name-only"],
+            cwd=run_cwd,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            encoding="utf-8",
+        )
+        if result.returncode == 0:
+            staged_files = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+            count = len(staged_files)
+            if count > threshold:
+                sample_files = ", ".join(staged_files[:3])
+                if count > 3:
+                    sample_files += f" 외 {count - 3}개"
+                return (
+                    True,
+                    f"스테이징된 파일 수({count}개: {sample_files})가 atomic-commits 권장 상한선({threshold}개)을 초과했습니다.\n"
+                    "빅뱅 커밋을 계속 진행하시겠습니까?",
+                )
+    except Exception:
+        # fail-open
+        pass
 
     return False, ""
 
@@ -102,6 +172,7 @@ def main():
 
         if tool_name == "run_command":
             cmd_line = args.get("CommandLine", "")
+            cwd = args.get("Cwd", "")
 
             # 1. 치명적 위험 명령어 검사 (하드 차단)
             is_dangerous, reason = check_dangerous_command(cmd_line)
@@ -110,7 +181,14 @@ def main():
                 print(json.dumps({"decision": "deny", "reason": reason}, ensure_ascii=False))
                 return
 
-            # 2. 커밋 메시지 컨벤션 검사 (하드 차단)
+            # 2. 와일드카드 스테이징 및 git commit -a 차단 (atomic-commits)
+            is_wildcard, wildcard_reason = check_wildcard_staging(cmd_line)
+            if is_wildcard:
+                state_manager.log_event("WILDCARD_STAGING_BLOCKED", conv_id, wildcard_reason, cmd_line)
+                print(json.dumps({"decision": "deny", "reason": wildcard_reason}, ensure_ascii=False))
+                return
+
+            # 3. 커밋 메시지 컨벤션 검사 (하드 차단) 및 대량 커밋 검사
             if re.search(r"\bgit\s+commit\b", cmd_line):
                 commit_msg = parse_commit_message(cmd_line)
                 if commit_msg:
@@ -136,7 +214,14 @@ def main():
                         )
                         return
 
-            # 3. 인프라 변경 작업 검사 (사용자 승인 요청)
+                # 4. 스테이징 파일 수 초과 검사 (ask)
+                is_bulk, bulk_reason = check_staged_file_count(cwd, commit_msg)
+                if is_bulk:
+                    state_manager.log_event("BULK_COMMIT_APPROVAL_REQUESTED", conv_id, bulk_reason, cmd_line)
+                    print(json.dumps({"decision": "ask", "reason": bulk_reason}, ensure_ascii=False))
+                    return
+
+            # 5. 인프라 변경 작업 검사 (사용자 승인 요청)
             needs_approval, approve_reason = check_infra_mutation(cmd_line)
             if needs_approval:
                 state_manager.log_event("INFRA_APPROVAL_REQUESTED", conv_id, approve_reason)
@@ -155,3 +240,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
