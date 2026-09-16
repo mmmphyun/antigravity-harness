@@ -27,7 +27,7 @@
   - Python Tooling: Use `uv run <cmd>` or `poetry run <cmd>` when available.
   - File Reading: `Get-Content <file>`
   - Pattern Search: `Select-String -Pattern "..."` (NEVER `grep`)
-  - Path Handling: Use Windows path conventions with proper quotes.
+  - Path Handling: Always use web-standard forward slashes (`/`) for all file paths in code, markdown links, CLI paths, git commands, and commit messages to eliminate string escape collisions (`\b`, `\t`, `\n`, `\f`).
   - CLI Tools: `gh` (GitHub CLI), `git`, `uv`, `docker`, `gcloud`
 
 ## 4. Commit Message Convention
