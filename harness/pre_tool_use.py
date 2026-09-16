@@ -84,6 +84,32 @@ def check_wildcard_staging(command_line: str) -> tuple[bool, str]:
     return False, ""
 
 
+def check_backslash_git_paths(command_line: str) -> tuple[bool, str]:
+    r"""Git add 명령어의 파일 경로 인자에서 백슬래시(\\) 사용 차단"""
+    if not re.search(r"\bgit\s+add\b", command_line):
+        return False, ""
+    try:
+        tokens = shlex.split(command_line, posix=False)
+    except Exception:
+        tokens = command_line.split()
+
+    is_add = False
+    for t in tokens:
+        if t == "add":
+            is_add = True
+            continue
+        if is_add:
+            if t.startswith("-"):
+                continue
+            if "\\" in t:
+                return (
+                    True,
+                    f"Git 경로 인자에 백슬래시(\\)가 포함되어 차단되었습니다: '{t}'\n"
+                    "웹 표준 포워드 슬래시(/)를 사용하세요 (예: git add path/to/file).",
+                )
+    return False, ""
+
+
 def check_dirty_push(command_line: str, cwd: str) -> tuple[bool, str]:
     """워킹 트리에 미커밋 변경사항이 남아있는 상태에서 git push 차단"""
     if not re.search(r"\bgit\s+push\b", command_line):
@@ -126,9 +152,7 @@ def check_staged_file_count(cwd: str, commit_msg: str, threshold: int = 4) -> tu
         return False, ""
 
     try:
-        if cwd and not os.path.isdir(cwd):
-            return False, ""
-        run_cwd = cwd if cwd else None
+        run_cwd = cwd if cwd and os.path.isdir(cwd) else None
         result = subprocess.run(
             ["git", "diff", "--cached", "--name-only"],
             cwd=run_cwd,
@@ -223,14 +247,21 @@ def main():
                 print(json.dumps({"decision": "deny", "reason": wildcard_reason}, ensure_ascii=False))
                 return
 
-            # 3. 워킹 트리 오염(Dirty Tree) 상태에서 git push 차단
+            # 3. Git add 경로 인자 백슬래시 사용 차단 (포워드 슬래시 강제)
+            is_backslash, backslash_reason = check_backslash_git_paths(cmd_line)
+            if is_backslash:
+                state_manager.log_event("BACKSLASH_GIT_PATH_BLOCKED", conv_id, backslash_reason, cmd_line)
+                print(json.dumps({"decision": "deny", "reason": backslash_reason}, ensure_ascii=False))
+                return
+
+            # 4. 워킹 트리 오염(Dirty Tree) 상태에서 git push 차단
             is_dirty_push, dirty_reason = check_dirty_push(cmd_line, cwd)
             if is_dirty_push:
                 state_manager.log_event("DIRTY_PUSH_BLOCKED", conv_id, dirty_reason, cmd_line)
                 print(json.dumps({"decision": "deny", "reason": dirty_reason}, ensure_ascii=False))
                 return
 
-            # 4. 커밋 메시지 컨벤션 검사 (하드 차단) 및 대량 커밋 검사
+            # 5. 커밋 메시지 컨벤션 검사 (하드 차단) 및 대량 커밋 검사
             if re.search(r"\bgit\s+commit\b", cmd_line):
                 commit_msg = parse_commit_message(cmd_line)
                 if commit_msg:
@@ -256,14 +287,14 @@ def main():
                         )
                         return
 
-                # 5. 스테이징 파일 수 초과 검사 (ask)
+                # 6. 스테이징 파일 수 초과 검사 (ask)
                 is_bulk, bulk_reason = check_staged_file_count(cwd, commit_msg)
                 if is_bulk:
                     state_manager.log_event("BULK_COMMIT_APPROVAL_REQUESTED", conv_id, bulk_reason, cmd_line)
                     print(json.dumps({"decision": "ask", "reason": bulk_reason}, ensure_ascii=False))
                     return
 
-            # 6. 인프라 변경 작업 검사 (사용자 승인 요청)
+            # 7. 인프라 변경 작업 검사 (사용자 승인 요청)
             needs_approval, approve_reason = check_infra_mutation(cmd_line)
             if needs_approval:
                 state_manager.log_event("INFRA_APPROVAL_REQUESTED", conv_id, approve_reason)

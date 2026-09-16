@@ -36,12 +36,26 @@ class TestHarness(unittest.TestCase):
         is_blocked, _ = pre_tool_use.check_wildcard_staging("git add src/user.py tests/test_user.py")
         self.assertFalse(is_blocked)
 
+    def test_backslash_git_paths_blocking(self):
+        # 1. git add에 백슬래시 포함된 경로 차단
+        is_blocked, _ = pre_tool_use.check_backslash_git_paths("git add src\\auth\\jwt.py")
+        self.assertTrue(is_blocked)
+
+        is_blocked, _ = pre_tool_use.check_backslash_git_paths("git add -v .\\tests\\test.py")
+        self.assertTrue(is_blocked)
+
+        # 2. 포워드 슬래시 경로는 정상 통과
+        is_blocked, _ = pre_tool_use.check_backslash_git_paths("git add src/auth/jwt.py tests/test.py")
+        self.assertFalse(is_blocked)
+
+        # 3. git add가 아닌 명령어나 커밋 메시지 본문은 영향 없음
+        is_blocked, _ = pre_tool_use.check_backslash_git_paths('git commit -m "fix: \\n bug"')
+        self.assertFalse(is_blocked)
+
     def test_dirty_push_check(self):
-        # 1. git push가 아닌 명령어는 통과
         is_dirty, _ = pre_tool_use.check_dirty_push("git status", ".")
         self.assertFalse(is_dirty)
 
-        # 2. 존재하지 않는 디렉터리에서는 fail-open으로 False 반환
         is_dirty, _ = pre_tool_use.check_dirty_push("git push origin main", "C:\\non_existent_dir_12345")
         self.assertFalse(is_dirty)
 
