@@ -20,6 +20,12 @@ COMMIT_REGEX = re.compile(
 )
 KOREAN_CHAR_REGEX = re.compile(r"[\uac00-\ud7a3\u1100-\u11ff\u3130-\u318f]")
 
+# 본문 텍스트 내에서 Windows 파일 경로 패턴(예: dir\file.py, .\dir\file) 탐지
+# \n, \t, \r, \", \' 등의 표준 이스케이프는 제외하고 실제 경로 백슬래시만 매칭
+BACKSLASH_PATH_IN_TEXT_REGEX = re.compile(
+    r"(?:\.|\b[a-zA-Z0-9_.-]+)\\(?:[a-zA-Z0-9_.-]+)"
+)
+
 # 대량 파일 수정이 정당화되는 예외 커밋 스코프/타입
 BULK_COMMIT_EXEMPTIONS = (
     "chore(init):",
@@ -84,29 +90,73 @@ def check_wildcard_staging(command_line: str) -> tuple[bool, str]:
     return False, ""
 
 
-def check_backslash_git_paths(command_line: str) -> tuple[bool, str]:
-    r"""Git add 명령어의 파일 경로 인자에서 백슬래시(\\) 사용 차단"""
-    if not re.search(r"\bgit\s+add\b", command_line):
+def check_backslash_git_and_gh(command_line: str) -> tuple[bool, str]:
+    r"""Git 및 gh CLI 명령어의 경로 인자 및 본문 내 백슬래시(\) 사용 차단"""
+    is_git_add = bool(re.search(r"\bgit\s+add\b", command_line))
+    is_git_commit = bool(re.search(r"\bgit\s+commit\b", command_line))
+    is_gh = bool(re.search(r"\bgh\s+(?:issue|pr|release|repo)\b", command_line))
+
+    if not (is_git_add or is_git_commit or is_gh):
         return False, ""
+
     try:
         tokens = shlex.split(command_line, posix=False)
     except Exception:
         tokens = command_line.split()
 
-    is_add = False
-    for t in tokens:
-        if t == "add":
-            is_add = True
-            continue
-        if is_add:
-            if t.startswith("-"):
+    # 1. git add 경로 인자 검사
+    if is_git_add:
+        is_add = False
+        for t in tokens:
+            if t == "add":
+                is_add = True
                 continue
-            if "\\" in t:
-                return (
-                    True,
-                    f"Git 경로 인자에 백슬래시(\\)가 포함되어 차단되었습니다: '{t}'\n"
-                    "웹 표준 포워드 슬래시(/)를 사용하세요 (예: git add path/to/file).",
-                )
+            if is_add:
+                if t.startswith("-"):
+                    continue
+                if "\\" in t:
+                    return (
+                        True,
+                        f"Git 경로 인자에 백슬래시(\\)가 포함되어 차단되었습니다: '{t}'\n"
+                        "웹 표준 포워드 슬래시(/)를 사용하세요 (예: git add path/to/file).",
+                    )
+
+    # 2. gh CLI 인자 검사 (경로 플래그 및 본문 내 백슬래시 경로)
+    if is_gh:
+        for i, t in enumerate(tokens):
+            # 파일 경로 지정 플래그 (-F, --body-file, --template) 검사
+            if t in ("-F", "--body-file", "--template") and i + 1 < len(tokens):
+                path_val = tokens[i + 1]
+                if "\\" in path_val:
+                    return (
+                        True,
+                        f"gh 파일 경로 플래그에 백슬래시(\\)가 포함되어 차단되었습니다: '{path_val}'\n"
+                        "웹 표준 포워드 슬래시(/)를 사용하세요 (예: --body-file path/to/file).",
+                    )
+            # 본문/제목 플래그 (-b, --body, -t, --title) 내 경로 검사
+            if t in ("-b", "--body", "-t", "--title") and i + 1 < len(tokens):
+                body_val = tokens[i + 1]
+                match = BACKSLASH_PATH_IN_TEXT_REGEX.search(body_val)
+                if match:
+                    return (
+                        True,
+                        f"gh 본문/제목에 백슬래시 파일 경로가 감지되어 차단되었습니다: '{match.group(0)}'\n"
+                        "마크다운 본문 내 파일 경로는 포워드 슬래시(/)를 사용하세요.",
+                    )
+
+    # 3. git commit 메시지 본문 내 파일 경로 검사
+    if is_git_commit:
+        for i, t in enumerate(tokens):
+            if t in ("-m", "--message") and i + 1 < len(tokens):
+                msg_val = tokens[i + 1]
+                match = BACKSLASH_PATH_IN_TEXT_REGEX.search(msg_val)
+                if match:
+                    return (
+                        True,
+                        f"커밋 메시지에 백슬래시 파일 경로가 감지되어 차단되었습니다: '{match.group(0)}'\n"
+                        "커밋 메시지 내 경로는 포워드 슬래시(/)를 사용하세요.",
+                    )
+
     return False, ""
 
 
@@ -247,10 +297,10 @@ def main():
                 print(json.dumps({"decision": "deny", "reason": wildcard_reason}, ensure_ascii=False))
                 return
 
-            # 3. Git add 경로 인자 백슬래시 사용 차단 (포워드 슬래시 강제)
-            is_backslash, backslash_reason = check_backslash_git_paths(cmd_line)
+            # 3. Git 및 gh 경로 인자 및 본문 내 백슬래시 차단 (포워드 슬래시 강제)
+            is_backslash, backslash_reason = check_backslash_git_and_gh(cmd_line)
             if is_backslash:
-                state_manager.log_event("BACKSLASH_GIT_PATH_BLOCKED", conv_id, backslash_reason, cmd_line)
+                state_manager.log_event("BACKSLASH_PATH_BLOCKED", conv_id, backslash_reason, cmd_line)
                 print(json.dumps({"decision": "deny", "reason": backslash_reason}, ensure_ascii=False))
                 return
 
@@ -313,4 +363,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

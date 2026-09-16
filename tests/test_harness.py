@@ -36,20 +36,33 @@ class TestHarness(unittest.TestCase):
         is_blocked, _ = pre_tool_use.check_wildcard_staging("git add src/user.py tests/test_user.py")
         self.assertFalse(is_blocked)
 
-    def test_backslash_git_paths_blocking(self):
-        # 1. git add에 백슬래시 포함된 경로 차단
-        is_blocked, _ = pre_tool_use.check_backslash_git_paths("git add src\\auth\\jwt.py")
+    def test_backslash_git_and_gh_blocking(self):
+        # 1. git add 경로에 백슬래시 차단
+        is_blocked, _ = pre_tool_use.check_backslash_git_and_gh("git add src\\auth\\jwt.py")
         self.assertTrue(is_blocked)
 
-        is_blocked, _ = pre_tool_use.check_backslash_git_paths("git add -v .\\tests\\test.py")
+        # 2. gh pr / issue 파일 경로 플래그 백슬래시 차단
+        is_blocked, _ = pre_tool_use.check_backslash_git_and_gh(
+            "gh pr create --title \"feat: auth\" --body-file .github\\pull_request_template.md"
+        )
         self.assertTrue(is_blocked)
 
-        # 2. 포워드 슬래시 경로는 정상 통과
-        is_blocked, _ = pre_tool_use.check_backslash_git_paths("git add src/auth/jwt.py tests/test.py")
-        self.assertFalse(is_blocked)
+        # 3. gh issue / pr 본문 내 백슬래시 경로 차단
+        is_blocked, _ = pre_tool_use.check_backslash_git_and_gh(
+            "gh issue create --title \"버그\" --body \"참조 파일: src\\auth\\jwt.py 오류 발생\""
+        )
+        self.assertTrue(is_blocked)
 
-        # 3. git add가 아닌 명령어나 커밋 메시지 본문은 영향 없음
-        is_blocked, _ = pre_tool_use.check_backslash_git_paths('git commit -m "fix: \\n bug"')
+        # 4. git commit 본문 내 백슬래시 경로 차단
+        is_blocked, _ = pre_tool_use.check_backslash_git_and_gh(
+            "git commit -m \"fix(auth): src\\auth\\jwt.py 파일 버그 수정\""
+        )
+        self.assertTrue(is_blocked)
+
+        # 5. 정상적인 포워드 슬래시 및 일반 텍스트 이스케이프(\n) 통과
+        is_blocked, _ = pre_tool_use.check_backslash_git_and_gh(
+            "gh pr create --title \"feat: auth\" --body \"줄바꿈\\n참조: src/auth/jwt.py\""
+        )
         self.assertFalse(is_blocked)
 
     def test_dirty_push_check(self):
