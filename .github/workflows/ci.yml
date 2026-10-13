@@ -1,4 +1,4 @@
-﻿name: Antigravity Harness CI
+name: Antigravity Harness CI
 
 on:
   push:
@@ -20,10 +20,10 @@ jobs:
         python-version: "3.12"
 
     - name: Install Ruff and Dependencies
-      run: pip install ruff mcp
+      run: pip install ruff
 
     - name: Run Ruff Linter
-      run: ruff check harness/ mem0_server/ tests/
+      run: ruff check harness/ tests/
 
   test:
     name: Test on ${{ matrix.os }} (Python ${{ matrix.python-version }})

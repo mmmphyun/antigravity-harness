@@ -1,1 +1,1 @@
-﻿mcp>=1.0.0
+# No external dependencies required (Python Standard Library only)
