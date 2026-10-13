@@ -7,7 +7,6 @@ import state_manager
 
 MAX_RETRIES = 3
 
-
 def find_test_command(workspace_dir: str) -> list[str] | None:
     """프로젝트 루트에 존재하는 빌드/테스트 설정에 맞추어 실행 명령 감지"""
     if not workspace_dir or not os.path.exists(workspace_dir):
@@ -20,9 +19,7 @@ def find_test_command(workspace_dir: str) -> list[str] | None:
         return [gradlew_bat, "test", "--no-daemon"]
     elif os.path.exists(gradlew_sh):
         return [gradlew_sh, "test", "--no-daemon"]
-    elif os.path.exists(os.path.join(workspace_dir, "build.gradle")) or os.path.exists(
-        os.path.join(workspace_dir, "build.gradle.kts")
-    ):
+    elif os.path.exists(os.path.join(workspace_dir, "build.gradle")) or os.path.exists(os.path.join(workspace_dir, "build.gradle.kts")):
         return ["gradle", "test", "--no-daemon"]
 
     # 2. Python 프로젝트 (uv -> poetry -> pytest 순 감지)
@@ -42,13 +39,46 @@ def find_test_command(workspace_dir: str) -> list[str] | None:
 
     return None
 
-
 def truncate_error_log(output: str, max_lines: int = 15) -> str:
     """에러 로그에서 상위 핵심 라인만 추출하여 컨텍스트 오염 방지"""
     lines = [line.strip() for line in output.splitlines() if line.strip()]
     if len(lines) <= max_lines:
         return "\n".join(lines)
     return "\n".join(lines[-max_lines:])
+
+
+def has_modified_code_files(workspace_dir: str) -> bool:
+    """Git 워킹 트리에 실제 수정/추가된 코드 파일이 있는지 확인"""
+    if not workspace_dir or not os.path.exists(workspace_dir):
+        return False
+    try:
+        res = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=workspace_dir,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if res.returncode != 0:
+            return True
+
+        output = res.stdout.strip()
+        if not output:
+            return False
+
+        code_extensions = (
+            ".py", ".java", ".ts", ".js", ".go", ".rs", ".cpp", ".c", ".kt", ".swift"
+        )
+        for line in output.splitlines():
+            parts = line.strip().split(maxsplit=1)
+            if len(parts) == 2:
+                filepath = parts[1].strip('"').lower()
+                if any(filepath.endswith(ext) for ext in code_extensions):
+                    return True
+
+        return False
+    except Exception:
+        return False
 
 
 def main():
@@ -69,25 +99,34 @@ def main():
             state_manager.log_event(
                 "CIRCUIT_BREAKER_TRIPPED",
                 conv_id,
-                f"최대 재시도({MAX_RETRIES}회) 초과로 회로 차단기 발동. 에이전트 종료 허용 및 사용자 인계.",
+                f"최대 재시도({MAX_RETRIES}회) 초과로 회로 차단기 발동. 에이전트 종료 허용 및 사용자 인계."
             )
             state_manager.reset_retry_count(conv_id)
-            # 차단기 발동 시 에이전트가 무한 루프 돌지 않도록 정상 종료 허용
             print(json.dumps({}))
             return
 
-        # 2. 스마트 테스트 도구 탐색 및 실행
-        test_cmd = find_test_command(workspace_dir)
-        if not test_cmd:
-            # 테스트 환경이 없는 프로젝트는 검증 없이 즉시 통과
+        # 2. 코드 수정 여부 확인 (스마트 스킵: 읽기 전용 및 문서 전용 턴 지연 차단)
+        if not has_modified_code_files(workspace_dir):
             state_manager.reset_retry_count(conv_id)
             print(json.dumps({}))
             return
 
-        # 3. 테스트 실행 (타임아웃 45초)
+        # 3. 스마트 테스트 도구 탐색 및 실행
+        test_cmd = find_test_command(workspace_dir)
+        if not test_cmd:
+            state_manager.reset_retry_count(conv_id)
+            print(json.dumps({}))
+            return
+
+        # 4. 테스트 실행 (타임아웃 15초)
         try:
             res = subprocess.run(
-                test_cmd, cwd=workspace_dir, capture_output=True, text=True, timeout=45, shell=True
+                test_cmd,
+                cwd=workspace_dir,
+                capture_output=True,
+                text=True,
+                timeout=15,
+                shell=True
             )
 
             if res.returncode != 0:
@@ -96,7 +135,9 @@ def main():
                 truncated_error = truncate_error_log(combined_output, max_lines=15)
 
                 new_retry_count = state_manager.increment_retry_count(
-                    conv_id, f"테스트 실패 ({test_cmd[0]})", truncated_error
+                    conv_id,
+                    f"테스트 실패 ({test_cmd[0]})",
+                    truncated_error
                 )
 
                 reason = (
@@ -108,16 +149,12 @@ def main():
             else:
                 # 테스트 성공 시 카운터 초기화
                 state_manager.reset_retry_count(conv_id)
-                state_manager.log_event(
-                    "TEST_PASSED", conv_id, f"테스트 성공: {' '.join(test_cmd)}"
-                )
+                state_manager.log_event("TEST_PASSED", conv_id, f"테스트 성공: {' '.join(test_cmd)}")
                 print(json.dumps({}))
                 return
 
         except subprocess.TimeoutExpired:
-            state_manager.log_event(
-                "TEST_TIMEOUT", conv_id, f"테스트 실행 시간 초과(45초): {' '.join(test_cmd)}"
-            )
+            state_manager.log_event("TEST_TIMEOUT", conv_id, f"테스트 실행 시간 초과(45초): {' '.join(test_cmd)}")
             print(json.dumps({}))
             return
         except Exception as e:
@@ -133,7 +170,6 @@ def main():
         except Exception:
             pass
         print(json.dumps({}))
-
 
 if __name__ == "__main__":
     main()
