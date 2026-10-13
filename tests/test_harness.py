@@ -1,4 +1,4 @@
-﻿import os
+import os
 import sys
 import unittest
 
@@ -117,6 +117,27 @@ class TestHarness(unittest.TestCase):
 
         state_manager.reset_retry_count(session_id)
         self.assertEqual(state_manager.get_retry_count(session_id), 0)
+
+    def test_sleep_command_blocking(self):
+        is_blocked, _ = pre_tool_use.check_sleep_command("Start-Sleep -Seconds 10")
+        self.assertTrue(is_blocked)
+
+        is_blocked, _ = pre_tool_use.check_sleep_command("sleep 5")
+        self.assertTrue(is_blocked)
+
+        is_blocked, _ = pre_tool_use.check_sleep_command("python test.py")
+        self.assertFalse(is_blocked)
+
+    def test_manage_task_rate_limiting(self):
+        session_id = "unit-test-task-polling"
+        # First call: allow
+        allowed, _ = state_manager.check_task_status_rate_limit(session_id, "task-1")
+        self.assertTrue(allowed)
+
+        # Immediate second call: block
+        allowed, reason = state_manager.check_task_status_rate_limit(session_id, "task-1")
+        self.assertFalse(allowed)
+        self.assertIn("반복 폴링", reason)
 
 
 if __name__ == "__main__":

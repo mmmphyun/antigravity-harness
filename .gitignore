@@ -1,4 +1,4 @@
-﻿__pycache__/
+__pycache__/
 *.py[cod]
 *$py.class
 .pytest_cache/
@@ -11,3 +11,5 @@ state.json
 .harness_state.json
 .DS_Store
 Thumbs.db
+uv.lock
+

@@ -1,4 +1,4 @@
-﻿import json
+import json
 import os
 import re
 import shlex
@@ -266,11 +266,23 @@ def check_infra_mutation(command_line: str) -> tuple[bool, str]:
     return False, ""
 
 
+def check_sleep_command(command_line: str) -> tuple[bool, str]:
+    """run_command를 통한 sleep/Start-Sleep 대기 명령 차단"""
+    if re.search(r"^\s*(?:start-sleep|sleep)\b", command_line, re.IGNORECASE):
+        reason = (
+            "하네스 가드레일: sleep/Start-Sleep을 통한 대기 명령이 차단되었습니다.\n"
+            "- 비동기 작업 대기는 추가 도구 호출을 중단하고 Reactive Wakeup(SYSTEM_MESSAGE)을 기다리십시오.\n"
+            "- 타이머 설정이 필요한 경우 schedule 도구를 사용하십시오."
+        )
+        return True, reason
+    return False, ""
+
+
 def main():
     try:
         raw_input = sys.stdin.read()
         if not raw_input.strip():
-            print(json.dumps({}, ensure_ascii=False))
+            print(json.dumps({"decision": "allow"}, ensure_ascii=False))
             return
 
         payload = json.loads(raw_input)
@@ -279,9 +291,48 @@ def main():
         tool_name = tool_call.get("name", "")
         args = tool_call.get("args", {})
 
+        # 0. 백그라운드 태스크 폴링 차단 (manage_task Action='status')
+        if tool_name == "manage_task":
+            action = args.get("Action", "")
+            task_id = args.get("TaskId", "")
+            if action == "status":
+                allowed, poll_reason = state_manager.check_task_status_rate_limit(conv_id, task_id)
+                if not allowed:
+                    print(json.dumps({"decision": "deny", "reason": poll_reason}, ensure_ascii=False))
+                    return
+
+        # 1. 비밀값(.env) 직접 접근 차단 (단, .example, .sample, .template은 명시적 허용)
+        if tool_name in ("view_file", "replace_file_content", "write_to_file"):
+            target_path = args.get("AbsolutePath") or args.get("TargetFile") or ""
+            norm_path = target_path.replace("\\", "/").lower()
+            filename = norm_path.split("/")[-1]
+
+            is_sample = any(filename.endswith(sfx) for sfx in (".example", ".sample", ".template"))
+            if not is_sample:
+                if filename == ".env" or filename.startswith(".env."):
+                    reason = f"Security: 비밀값 파일('{filename}')에 대한 직접 접근이 차단되었습니다. 템플릿(.env.example)을 사용하세요."
+                    state_manager.log_event("SECRET_FILE_BLOCKED", conv_id, reason, target_path)
+                    print(json.dumps({"decision": "deny", "reason": reason}, ensure_ascii=False))
+                    return
+
         if tool_name == "run_command":
             cmd_line = args.get("CommandLine", "")
             cwd = args.get("Cwd", "")
+
+            # sleep 계열 대기 명령 차단
+            is_sleep, sleep_reason = check_sleep_command(cmd_line)
+            if is_sleep:
+                state_manager.log_event("SLEEP_CMD_BLOCKED", conv_id, sleep_reason, cmd_line)
+                print(json.dumps({"decision": "deny", "reason": sleep_reason}, ensure_ascii=False))
+                return
+
+            # CLI 명령어(Get-Content, cat, type 등)를 통한 .env 직접 덤프 차단
+            cmd_lower = cmd_line.lower()
+            if re.search(r"\b(?:get-content|gc|cat|type)\s+.*(?<!\.example)(?<!\.sample)(?<!\.template)\.env\b", cmd_lower):
+                reason = "Security: CLI 명령어를 통한 .env 비밀값 직접 조회가 차단되었습니다."
+                state_manager.log_event("SECRET_CLI_DUMP_BLOCKED", conv_id, reason, cmd_line)
+                print(json.dumps({"decision": "deny", "reason": reason}, ensure_ascii=False))
+                return
 
             # 1. 치명적 위험 명령어 검사 (하드 차단)
             is_dangerous, reason = check_dangerous_command(cmd_line)
@@ -351,14 +402,14 @@ def main():
                 print(json.dumps({"decision": "ask", "reason": approve_reason}, ensure_ascii=False))
                 return
 
-        print(json.dumps({}, ensure_ascii=False))
+        print(json.dumps({"decision": "allow"}, ensure_ascii=False))
 
     except Exception as e:
         try:
             state_manager.log_event("PRE_TOOL_USE_ERROR", "system", f"Fail-open triggered: {e!s}")
         except Exception:
             pass
-        print(json.dumps({}, ensure_ascii=False))
+        print(json.dumps({"decision": "allow"}, ensure_ascii=False))
 
 
 if __name__ == "__main__":

@@ -1,12 +1,12 @@
-﻿{
+{
   "antigravity-harness": {
     "PreToolUse": [
       {
-        "matcher": "run_command",
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",
-            "command": "python \"C:\\Users\\User\\.gemini\\config\\harness\\pre_tool_use.py\"",
+            "command": "python harness/pre_tool_use.py",
             "timeout": 15
           }
         ]
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"C:\\Users\\User\\.gemini\\config\\harness\\post_tool_use.py\"",
+            "command": "python harness/post_tool_use.py",
             "timeout": 15
           }
         ]
@@ -27,7 +27,7 @@
     "Stop": [
       {
         "type": "command",
-        "command": "python \"C:\\Users\\User\\.gemini\\config\\harness\\stop_validator.py\"",
+        "command": "python harness/stop_validator.py",
         "timeout": 60
       }
     ]
