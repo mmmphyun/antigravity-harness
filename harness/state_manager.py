@@ -1,5 +1,5 @@
-import os
 import json
+import os
 import time
 from datetime import datetime
 
@@ -38,7 +38,7 @@ def increment_retry_count(conv_id: str, reason: str, details: str = "") -> int:
     })
     state[conv_id] = session_data
     _save_state(state)
-    
+
     log_event("RETRY_INCREMENT", conv_id, reason, details)
     return session_data["retry_count"]
 
