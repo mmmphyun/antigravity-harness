@@ -1,6 +1,7 @@
 import os
 import sys
 import unittest
+import uuid
 
 # harness 디렉터리를 sys.path에 추가
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "harness")))
@@ -129,7 +130,7 @@ class TestHarness(unittest.TestCase):
         self.assertFalse(is_blocked)
 
     def test_manage_task_rate_limiting(self):
-        session_id = "unit-test-task-polling"
+        session_id = f"unit-test-task-polling-{uuid.uuid4()}"
         # First call: allow
         allowed, _ = state_manager.check_task_status_rate_limit(session_id, "task-1")
         self.assertTrue(allowed)
